@@ -1,13 +1,13 @@
-# 😷 Real-Time Mask Detection App 🚀
+# 😷 Real-Time Mask Detection with TF.js & MQTT 🚀
 
-A fun, web-based computer vision app that spots masks in real-time using a YOLOv11 model and broadcasts the findings through the magic of MQTT! 📡
+A slick web app that runs a YOLOv11 model right in your browser and broadcasts the detection results via MQTT! 📡
 
 ## ✨ Quick Overview
 
-This project has two main parts that talk to each other:
+This project uses a clever architecture where the heavy lifting happens on the client-side!
 
-1.  **🐍 The Brains (Python/Flask):** A separate computer vision script that watches a video stream, detects masks using a YOLOv11 model, and shouts its findings (mask/no-mask) into an MQTT topic.
-2.  **🌉 The Bridge (Node.js - This Repo):** An Express server that listens to the MQTT shouts, serves a cool web dashboard to show the results, and lets you send messages back.
+1.  **🧠 Frontend (Your Browser):** The web page loads a **TensorFlow.js** model, uses your webcam, and performs real-time mask detection directly in the browser. No powerful server is needed for the AI!
+2.  **🌉 Backend (Node.js Server):** A lightweight Express server that serves the frontend and acts as a bridge. It takes the detection results from the browser and publishes them to an MQTT broker.
 
 Here's the flow:
 
@@ -35,7 +35,7 @@ cv-mqtt/
 ## ⚙️ Tech Stack
 
 *   **🤖 Computer Vision (External Component):**
-    *   Python 🐍 & Flask 🌶️
+    *   Python 🐍
     *   YOLOv11
 *   **📡 Backend (This Repo):**
     *   Node.js 🟢
@@ -93,7 +93,7 @@ npm run dev
 For production, you can add a `start` script to your `package.json` and run it:
 
 ```bash
-# In package.json, add: "start": "node server.js"
+# In package.json, add: "dev": "nodemon server.js"
 npm start
 ```
 
@@ -104,7 +104,7 @@ Your server should now be live at `http://localhost:3000`! 🌍
 This app is set up to connect to a public MQTT broker out-of-the-box.
 
 *   **Broker:** `mqtt://test.mosquitto.org` (You can change this in `server.js`).
-*   **Subscribes to:** `prediction/jarak` (or whatever you set in `MQTT_TOPIC_SUBS`). Your Python CV script should publish data to this topic.
+*   **Subscribes to:** `prediction/jarak` (or whatever you set in `MQTT_TOPIC_SUBS`).
 *   **Publishes to:** `prediction/output` (or whatever you set in `MQTT_TOPIC_PUBLISH`). The web UI sends data to this topic.
 
 ## 🔍 Sample Usage
