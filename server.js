@@ -19,6 +19,7 @@ const mqttClient = mqtt.connect("mqtt://test.mosquitto.org");
 mqttClient.on("connect", () => {
   console.log("Connected to MQTT broker");
 
+  // Kalau ada data yang di subscribe
   const topic = process.env.MQTT_TOPIC_SUBS;
   mqttClient.subscribe(topic, (err) => {
     if (err) {
