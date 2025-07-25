@@ -75,11 +75,10 @@ cp .env.example .env
 
 Now, open `.env` and check the topics. The defaults are:
 ```env
-# .env
-APP_URL=http://localhost:
-PORT=3000
-MQTT_TOPIC_PUBLISH=prediction/output
-MQTT_TOPIC_SUBS=prediction/jarak
+APP_URL=
+PORT=
+MQTT_TOPIC_PUBLISH=your/publish/topic
+MQTT_TOPIC_SUBS=your/subscribe/topic
 ```
 
 ### 3. Fire it up! 🔥
@@ -104,7 +103,6 @@ Your server should now be live at `http://localhost:3000`! 🌍
 This app is set up to connect to a public MQTT broker out-of-the-box.
 
 *   **Broker:** `mqtt://test.mosquitto.org` (You can change this in `server.js`).
-*   **Subscribes to:** `prediction/jarak` (or whatever you set in `MQTT_TOPIC_SUBS`).
 *   **Publishes to:** `prediction/output` (or whatever you set in `MQTT_TOPIC_PUBLISH`). The web UI sends data to this topic.
 
 ## 🔍 Sample Usage
@@ -119,7 +117,10 @@ The server provides a couple of simple API endpoints for the frontend.
     **Example Response:**
     ```json
     {
-      "data": "{\"status\": \"Mask Detected\", \"distance\": 50}"
+      "data": {
+        label : "mask", 
+        score : 0.999,
+      }
     }
     ```
 
@@ -132,7 +133,7 @@ The server provides a couple of simple API endpoints for the frontend.
     ```json
     {
       "message": "Message published successfully",
-      "payload": "manual_override"
+      "payload": "mask, no-mask"
     }
     ```
 
