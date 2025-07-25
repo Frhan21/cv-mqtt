@@ -66,5 +66,5 @@ const port = process.env.PORT || 3000;
 const url = process.env.APP_URL
 
 app.listen(port, () => {
-  console.log(`Server is running on ${url}${port}`);
+  console.log(`Server is running on ${url}:${port}`);
 });

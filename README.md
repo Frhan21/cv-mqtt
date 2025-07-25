@@ -75,8 +75,8 @@ cp .env.example .env
 
 Now, open `.env` and check the topics. The defaults are:
 ```env
-APP_URL=
-PORT=
+APP_URL=http://localhost
+PORT=3000
 MQTT_TOPIC_PUBLISH=your/publish/topic
 MQTT_TOPIC_SUBS=your/subscribe/topic
 ```
@@ -118,8 +118,8 @@ The server provides a couple of simple API endpoints for the frontend.
     ```json
     {
       "data": {
-        label : "mask", 
-        score : 0.999,
+        "label" : "mask", 
+        "score" : 0.999,
       }
     }
     ```
@@ -133,7 +133,10 @@ The server provides a couple of simple API endpoints for the frontend.
     ```json
     {
       "message": "Message published successfully",
-      "payload": "mask, no-mask"
+      "payload": {
+        "label" : "mask", 
+        "score" : 0.999,
+      }
     }
     ```
 
