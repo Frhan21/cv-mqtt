@@ -16,6 +16,9 @@ const CLASS_COLORS = ["lime", "red"];
 let isDetecting = false;
 let detectLoopId = null;
 
+let lastApiCallTime = 0;
+const API_CALL_DELAY = 1000;
+
 // Setup webcam
 async function setupCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -29,6 +32,32 @@ async function setupCamera() {
   return new Promise((resolve) => {
     video.onloadedmetadata = () => resolve(video);
   });
+}
+
+async function sendData(data) {
+  if (data.length === 0) return;
+
+  const payload = data.map((result) => result.label).join(",");
+  console.log("Mengirim data (text):", payload);
+
+  try {
+    const response = await fetch("/prediction", {
+      method: "POST",
+      headers: {
+        "Content-Type": "text/plain",
+      },
+      body: payload,
+    });
+
+    if (!response.ok) {
+      console.error(`Panggilan API gagal dengan status: ${response.status}`);
+    } else {
+      const responseText = await response.text();
+      console.log("Data berhasil dikirim. Respons server:", responseText);
+    }
+  } catch (error) {
+    console.error("Gagal mengirim data deteksi:", error);
+  }
 }
 
 // Load TFJS model
@@ -131,6 +160,8 @@ async function detectFrame() {
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  const results = [];
+
   for (const index of selected) {
     const [y1, x1, y2, x2] = boxList[index];
     const score = scoreList[index];
@@ -143,10 +174,19 @@ async function detectFrame() {
     const x = x1 + w / 2;
     const y = y1 + h / 2;
 
+    results.push({ label: label, score: score });
+
     drawBox([x, y, w, h], score, label, color); // 👉 Kirim warna ke fungsi drawBox
   }
 
   tf.engine().endScope();
+
+  const currentTime = Date.now();
+  // 👇 PERBAIKAN DI DUA BARIS INI
+  if (currentTime - lastApiCallTime > API_CALL_DELAY && results.length > 0) {
+    sendData(results);
+    lastApiCallTime = currentTime;
+  }
 
   if (isDetecting) {
     detectLoopId = requestAnimationFrame(detectFrame);
