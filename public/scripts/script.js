@@ -2,14 +2,13 @@ const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 
+const cameraStream = document.getElementById("cameraStream");
+
 let model;
-// 👉 1. Ukuran input model diubah sesuai metadata.yaml
-const modelInputSize = 640;
+const modelInputSize = 480;
 const CONFIDENCE_THRESHOLD = 0.5;
 const IOU_THRESHOLD = 0.4;
 
-// // 👉 2. Nama kelas diperbarui sesuai metadata.yaml
-// const CLASS_NAMES = ["mask", "no-mask"];
 const CLASS_NAMES = ["Mobil", "PengendaraMotor", "pejalan kaki"];
 // 👉 Menambahkan warna untuk setiap kelas
 const CLASS_COLORS = ["lime", "red", "blue"];
@@ -17,71 +16,45 @@ const CLASS_COLORS = ["lime", "red", "blue"];
 let isDetecting = false;
 let detectLoopId = null;
 
+// 👉 Variabel untuk throttling API
 let lastApiCallTime = 0;
-const API_CALL_DELAY = 1000;
+const API_CALL_DELAY = 2000; // Delay dalam milidetik (1000ms = 1 detik)
 
-// Setup webcam
-// async function setupCamera() {
-//   const stream = await navigator.mediaDevices.getUserMedia({
-//     video: {
-//       width: 640,
-//       height: 480,
-//     },
-//     audio: false,
-//   });
-//   video.srcObject = stream;
-//   return new Promise((resolve) => {
-//     video.onloadedmetadata = () => resolve(video);
-//   });
-// }
-
-async function setupCamera(ipAddress = 'http://10.118.207.3:80/stream') {
-  // Ambil elemen video yang sudah ada di HTML
-  const video = document.getElementById('video'); 
-
-  if (!video) {
-    console.error('Elemen video dengan id="video" tidak ditemukan.');
-    return null;
-  }
-
-  // Setel sumber video langsung ke URL stream MJPEG dari ESP32-CAM
-  // Perhatikan bahwa ESP32-CAM biasanya menggunakan port 81 untuk stream MJPEG
-  video.src = ipAddress; 
-
-  // Mengembalikan promise untuk memastikan video dimuat
-  return new Promise((resolve, reject) => {
-    // Event 'loadeddata' atau 'canplay' lebih cocok untuk konfirmasi bahwa data video sudah mulai diterima
-    video.onloadeddata = () => {
-      console.log(`Stream dari ESP32-CAM (${ipAddress}) berhasil dimuat.`);
-      resolve(video);
-    };
-
-    // Tambahkan penanganan kesalahan jika stream gagal dimuat
-    video.onerror = () => {
-      console.error(`Gagal memuat stream video dari ESP32-CAM di ${ipAddress}.`);
-      reject(new Error(`Gagal memuat stream video dari ESP32-CAM.`));
-    };
-  });
+// Fungsi untuk menyesuaikan ukuran canvas dengan video
+function resizeCanvas() {
+  canvas.width = cameraStream.clientWidth;
+  canvas.height = cameraStream.clientHeight;
 }
 
+// Setup API Function
 async function sendData(data) {
   if (data.length === 0) return;
 
+  // Ambil hanya labelnya dan gabungkan menjadi satu string dipisahkan koma
   const payload = data.map((result) => result.label).join(",");
+
+  // const payload = {
+  //     "datetime": new Date().toISOString(),
+  //     "data": data
+  // }
+
   console.log("Mengirim data (text):", payload);
 
   try {
     const response = await fetch("/prediction", {
       method: "POST",
       headers: {
-        "Content-Type": "text/plain",
+        // Ubah tipe konten menjadi text/plain
+        "Content-Type": "text/plain", //kalo mau text aja ==> text/plain, ganti bagian ini
       },
+      // Kirim string mentah sebagai body
       body: payload,
     });
 
     if (!response.ok) {
-      console.error(`Panggilan API gagal dengan status: ${response.status}`);
+      console.error(`Panggilan API gagal dengan status: ${response.err}`);
     } else {
+      // Baca respons dari server sebagai teks
       const responseText = await response.text();
       console.log("Data berhasil dikirim. Respons server:", responseText);
     }
@@ -90,13 +63,59 @@ async function sendData(data) {
   }
 }
 
-// Load TFJS model
-async function loadModel() {
-  model = await tf.loadGraphModel("public/mode_uji/model.json");
-  console.log("Model loaded successfully.");
+// Setup webcam
+// Setup webcam (DIPERBAIKI UNTUK MJPEG DENGAN <img>)
+
+async function setupCamera(ipAddress = "http://localhost:3000/stream") {
+  if (!video || !cameraStream) {
+    console.error("Elemen video atau cameraStream tidak ditemukan.");
+    return null;
+  }
+
+  cameraStream.crossOrigin = "anonymous";
+  cameraStream.src = ipAddress;
+  console.log(`Mencoba memuat stream dari proxy server: ${ipAddress}`);
+
+  return new Promise((resolve, reject) => {
+    cameraStream.onload = () => {
+      console.log(`Stream berhasil dimuat dari proxy ${ipAddress}`);
+      video.width = cameraStream.naturalWidth || 640;
+      video.height = cameraStream.naturalHeight || 480;
+      resizeCanvas();
+      resolve(cameraStream);
+    };
+
+    cameraStream.onerror = (e) => {
+      console.error(`Gagal memuat stream dari ${ipAddress}`, e);
+      alert(
+        "Tidak dapat memuat stream. Pastikan server dan kamera ESP32-CAM aktif."
+      );
+      reject(new Error("Stream gagal dimuat dari proxy server."));
+    };
+  });
 }
 
-// 👉 Modifikasi: Menggambar bounding box dengan warna dan label yang sesuai
+// FUNGSI resizeCanvas() DIPERBAIKI (HARUS MENGACU KE UKURAN <img>)
+function resizeCanvas() {
+  // Canvas disesuaikan ukurannya dengan elemen <img>
+  canvas.width = cameraStream.clientWidth;
+  canvas.height = cameraStream.clientHeight;
+}
+
+// Load TFJS model
+async function loadModel() {
+  try {
+    model = await tf.loadGraphModel("./mode_uji/model.json");
+    console.log("Model loaded successfully.");
+  } catch (err) {
+    console.error("Failed to load model:", err);
+    alert(
+      "Gagal memuat model. Pastikan file model.json dan .bin berada di folder yang benar."
+    );
+  }
+}
+
+// Menggambar bounding box
 function drawBox([x, y, w, h], score, label, color) {
   const scaleX = canvas.width / modelInputSize;
   const scaleY = canvas.height / modelInputSize;
@@ -106,7 +125,6 @@ function drawBox([x, y, w, h], score, label, color) {
   const boxW = w * scaleX;
   const boxH = h * scaleY;
 
-  // Atur warna dan gaya teks
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.strokeRect(x1, y1, boxW, boxH);
@@ -139,28 +157,33 @@ async function applyNMS(boxes, scores) {
   return selected;
 }
 
-// Loop deteksi untuk multi-class
+// Loop deteksi
 async function detectFrame() {
+  if (!isDetecting) return; // Hentikan jika sudah tidak mendeteksi
+
   tf.engine().startScope();
 
   const input = tf.browser
-    .fromPixels(video)
+    .fromPixels(cameraStream)
     .resizeBilinear([modelInputSize, modelInputSize])
     .div(255.0)
     .expandDims(0);
 
   const prediction = await model.execute(input);
-  // Transpose output dari [1, 6, 8400] menjadi [8400, 6]
   const data = prediction.transpose([0, 2, 1]).squeeze();
   const predictionsArray = await data.array();
+
+  input.dispose();
+  prediction.dispose();
+  data.dispose();
 
   const boxList = [];
   const scoreList = [];
   const classList = [];
 
-  for (const prediction of predictionsArray) {
-    const boxCoords = prediction.slice(0, 4);
-    const classScores = prediction.slice(4);
+  for (const p of predictionsArray) {
+    const boxCoords = p.slice(0, 4);
+    const classScores = p.slice(4);
 
     let maxScore = 0;
     let classId = -1;
@@ -197,36 +220,33 @@ async function detectFrame() {
     const score = scoreList[index];
     const classId = classList[index];
     const label = CLASS_NAMES[classId];
-    const color = CLASS_COLORS[classId]; // 👉 Ambil warna berdasarkan kelas
+    const color = CLASS_COLORS[classId];
+
+    results.push({ label: label, score: score });
 
     const w = x2 - x1;
     const h = y2 - y1;
     const x = x1 + w / 2;
     const y = y1 + h / 2;
 
-    results.push({ label: label, score: score });
-
-    drawBox([x, y, w, h], score, label, color); // 👉 Kirim warna ke fungsi drawBox
+    drawBox([x, y, w, h], score, label, color);
   }
-
-  tf.engine().endScope();
-
+  //Hapus kalo tidak mau dipakai
   const currentTime = Date.now();
-  // 👇 PERBAIKAN DI DUA BARIS INI
   if (currentTime - lastApiCallTime > API_CALL_DELAY && results.length > 0) {
     sendData(results);
     lastApiCallTime = currentTime;
   }
 
-  if (isDetecting) {
-    detectLoopId = requestAnimationFrame(detectFrame);
-  }
+  tf.engine().endScope();
+
+  detectLoopId = requestAnimationFrame(detectFrame);
 }
 
 // Event listener untuk tombol
 document.getElementById("startBtn").addEventListener("click", () => {
   if (!model) {
-    console.log("Model not loaded yet, please wait.");
+    console.log("Model belum siap, harap tunggu.");
     return;
   }
   if (!isDetecting) {
@@ -246,8 +266,17 @@ document.getElementById("stopBtn").addEventListener("click", () => {
 
 // Inisialisasi
 (async () => {
+  const startBtn = document.getElementById("startBtn");
+  startBtn.textContent = "Memuat Model...";
   await setupCamera();
   await loadModel();
-  document.getElementById("startBtn").disabled = false;
-  console.log("Setup complete. Ready to start detection.");
+
+  if (model) {
+    startBtn.disabled = false;
+    startBtn.textContent = "Mulai Deteksi";
+    console.log("Setup complete. Ready to start detection.");
+  } else {
+    startBtn.textContent = "Gagal Memuat";
+    startBtn.classList.add("bg-red-500");
+  }
 })();
