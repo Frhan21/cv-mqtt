@@ -21,8 +21,10 @@
 
             <div
                 class="relative w-full max-w-2xl mx-auto border-2 border-cyan-500 rounded-lg shadow-2xl shadow-cyan-500/20 overflow-hidden">
+                <img id="cameraStream" class="w-full h-fit" src
+                    alt="ESP32 Camera Stream">
                 <video id="video" autoplay playsinline muted
-                    class="w-full h-auto"></video>
+                    class="w-full h-auto" style="display:none;"></video>
                 <canvas id="canvas" class="absolute top-0 left-0"></canvas>
             </div>
 
@@ -48,13 +50,16 @@
         const canvas = document.getElementById("canvas");
         const ctx = canvas.getContext("2d");
 
+        const cameraStream = document.getElementById("cameraStream"); 
+
         let model;
-        const modelInputSize = 640; 
+        const modelInputSize = 480; 
         const CONFIDENCE_THRESHOLD = 0.5;
         const IOU_THRESHOLD = 0.4;
         
-        const CLASS_NAMES = ['mask', 'no-mask']; 
-        const CLASS_COLORS = ['lime', 'red'];
+        const CLASS_NAMES = ["Mobil", "PengendaraMotor", "pejalan kaki"];
+        // 👉 Menambahkan warna untuk setiap kelas
+        const CLASS_COLORS = ["lime", "red", "blue"];
 
         let isDetecting = false;
         let detectLoopId = null;
@@ -65,8 +70,8 @@
 
         // Fungsi untuk menyesuaikan ukuran canvas dengan video
         function resizeCanvas() {
-            canvas.width = video.clientWidth;
-            canvas.height = video.clientHeight;
+            canvas.width = cameraStream.clientWidth;
+            canvas.height = cameraStream.clientHeight;
         }
 
         // Setup API Function 
@@ -107,29 +112,50 @@
         }
 
         // Setup webcam
-        async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: 640,
-                    height: 480
-                },
-                audio: false,
-            });
-            video.srcObject = stream;
-            return new Promise((resolve) => {
-                video.onloadedmetadata = () => {
-                    resizeCanvas();
-                    window.addEventListener('resize', resizeCanvas); // Sesuaikan canvas jika ukuran window berubah
-                    resolve(video);
-                };
-            });
+        // Setup webcam (DIPERBAIKI UNTUK MJPEG DENGAN <img>)
+
+
+        async function setupCamera(ipAddress = "http://localhost:3000/stream") {
+        if (!video || !cameraStream) {
+          console.error("Elemen video atau cameraStream tidak ditemukan.");
+          return null;
         }
 
-        // Load TFJS model
-        async function loadModel() {
-            try {
-                model = await tf.loadGraphModel("./best_web_model/model.json");
-                console.log("Model loaded successfully.");
+        cameraStream.crossOrigin = "anonymous";
+        cameraStream.src = ipAddress;
+        console.log(`Mencoba memuat stream dari proxy server: ${ipAddress}`);
+
+        return new Promise((resolve, reject) => {
+          cameraStream.onload = () => {
+            console.log(`Stream berhasil dimuat dari proxy ${ipAddress}`);
+            video.width = cameraStream.naturalWidth || 640;
+            video.height = cameraStream.naturalHeight || 480;
+            resizeCanvas();
+            resolve(cameraStream);
+          };
+
+          cameraStream.onerror = (e) => {
+            console.error(`Gagal memuat stream dari ${ipAddress}`, e);
+            alert(
+              "Tidak dapat memuat stream. Pastikan server dan kamera ESP32-CAM aktif."
+            );
+            reject(new Error("Stream gagal dimuat dari proxy server."));
+          };
+        });
+      }
+
+// FUNGSI resizeCanvas() DIPERBAIKI (HARUS MENGACU KE UKURAN <img>)
+function resizeCanvas() {
+    // Canvas disesuaikan ukurannya dengan elemen <img>
+    canvas.width = cameraStream.clientWidth;
+    canvas.height = cameraStream.clientHeight;
+}
+
+// Load TFJS model
+async function loadModel() {
+    try {
+        model = await tf.loadGraphModel("./mode_uji/model.json");
+        console.log("Model loaded successfully.");
             } catch (err) {
                 console.error("Failed to load model:", err);
                 alert("Gagal memuat model. Pastikan file model.json dan .bin berada di folder yang benar.");
@@ -180,7 +206,7 @@
 
             tf.engine().startScope();
 
-            const input = tf.browser.fromPixels(video)
+            const input = tf.browser.fromPixels(cameraStream)
                 .resizeBilinear([modelInputSize, modelInputSize])
                 .div(255.0)
                 .expandDims(0);

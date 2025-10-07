@@ -1,0 +1,22 @@
+description: Ultralytics YOLO11n model trained on /content/SDect_BlindSpot-3/data.yaml
+author: Ultralytics
+date: '2025-08-22T14:23:13.613549'
+version: 8.3.184
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 480
+- 480
+names:
+  0: Mobil
+  1: PengendaraMotor
+  2: pejalan kaki
+args:
+  batch: 1
+  half: false
+  int8: false
+  nms: false
+channels: 3

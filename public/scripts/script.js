@@ -8,10 +8,11 @@ const modelInputSize = 640;
 const CONFIDENCE_THRESHOLD = 0.5;
 const IOU_THRESHOLD = 0.4;
 
-// 👉 2. Nama kelas diperbarui sesuai metadata.yaml
-const CLASS_NAMES = ["mask", "no-mask"];
+// // 👉 2. Nama kelas diperbarui sesuai metadata.yaml
+// const CLASS_NAMES = ["mask", "no-mask"];
+const CLASS_NAMES = ["Mobil", "PengendaraMotor", "pejalan kaki"];
 // 👉 Menambahkan warna untuk setiap kelas
-const CLASS_COLORS = ["lime", "red"];
+const CLASS_COLORS = ["lime", "red", "blue"];
 
 let isDetecting = false;
 let detectLoopId = null;
@@ -20,17 +21,46 @@ let lastApiCallTime = 0;
 const API_CALL_DELAY = 1000;
 
 // Setup webcam
-async function setupCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      width: 640,
-      height: 480,
-    },
-    audio: false,
-  });
-  video.srcObject = stream;
-  return new Promise((resolve) => {
-    video.onloadedmetadata = () => resolve(video);
+// async function setupCamera() {
+//   const stream = await navigator.mediaDevices.getUserMedia({
+//     video: {
+//       width: 640,
+//       height: 480,
+//     },
+//     audio: false,
+//   });
+//   video.srcObject = stream;
+//   return new Promise((resolve) => {
+//     video.onloadedmetadata = () => resolve(video);
+//   });
+// }
+
+async function setupCamera(ipAddress = 'http://10.118.207.3:80/stream') {
+  // Ambil elemen video yang sudah ada di HTML
+  const video = document.getElementById('video'); 
+
+  if (!video) {
+    console.error('Elemen video dengan id="video" tidak ditemukan.');
+    return null;
+  }
+
+  // Setel sumber video langsung ke URL stream MJPEG dari ESP32-CAM
+  // Perhatikan bahwa ESP32-CAM biasanya menggunakan port 81 untuk stream MJPEG
+  video.src = ipAddress; 
+
+  // Mengembalikan promise untuk memastikan video dimuat
+  return new Promise((resolve, reject) => {
+    // Event 'loadeddata' atau 'canplay' lebih cocok untuk konfirmasi bahwa data video sudah mulai diterima
+    video.onloadeddata = () => {
+      console.log(`Stream dari ESP32-CAM (${ipAddress}) berhasil dimuat.`);
+      resolve(video);
+    };
+
+    // Tambahkan penanganan kesalahan jika stream gagal dimuat
+    video.onerror = () => {
+      console.error(`Gagal memuat stream video dari ESP32-CAM di ${ipAddress}.`);
+      reject(new Error(`Gagal memuat stream video dari ESP32-CAM.`));
+    };
   });
 }
 
@@ -62,7 +92,7 @@ async function sendData(data) {
 
 // Load TFJS model
 async function loadModel() {
-  model = await tf.loadGraphModel("model/model.json");
+  model = await tf.loadGraphModel("public/mode_uji/model.json");
   console.log("Model loaded successfully.");
 }
 

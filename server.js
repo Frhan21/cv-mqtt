@@ -1,16 +1,41 @@
 require("dotenv").config();
 
+
+
+
 const express = require("express");
 const path = require("path");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const mqtt = require("mqtt");
+const fetch = require("node-fetch");
 
 const app = express();
 
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, "public")));
+
+
+const ESP32_URL = process.env.ESP32_URL || "http://10.118.207.3:81/stream";
+app.get("/stream", async (req, res) => {
+  try {
+    console.log(`Proxying stream from ${ESP32_URL}`);
+    const response = await fetch(ESP32_URL);
+    if (!response.ok) {
+      return res.status(500).send("Gagal mengambil stream dari ESP32-CAM");
+    }
+
+    // Header agar browser boleh akses pixel data
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "multipart/x-mixed-replace; boundary=frame");
+
+    response.body.pipe(res);
+  } catch (err) {
+    console.error("Gagal mem-proxy stream:", err);
+    res.status(500).send("Error saat mem-proxy stream.");
+  }
+});
 
 // Start MQTT
 let data;
