@@ -4,15 +4,15 @@ A slick web app that runs a YOLOv11 model right in your browser and broadcasts t
 
 ## ✨ Quick Overview
 
-This project uses a clever architecture where the heavy lifting happens on the client-side!
+This project uses a clever architecture where ALL the heavy lifting happens on the client-side!
 
-1.  **🧠 Frontend (Your Browser):** The web page loads a **TensorFlow.js** model, uses your webcam, and performs real-time mask detection directly in the browser. No powerful server is needed for the AI!
-2.  **🌉 Backend (Node.js Server):** A lightweight Express server that serves the frontend and acts as a bridge. It takes the detection results from the browser and publishes them to an MQTT broker.
+1.  **🧠 Frontend (Your Browser):** The web page loads a **TensorFlow.js** model, uses your webcam, performs real-time mask detection directly in the browser, and **publishes the results straight to the MQTT broker over WebSocket** — no backend needed!
+2.  **🌉 Backend (Node.js Server, optional):** Only used for local development (`npm run dev`). It serves the frontend and exposes `/get-data` + `/prediction` endpoints for testing.
 
 Here's the flow:
 
 ```
-[🐍 CV Script] ---📢---> [📡 MQTT Broker] <---👂--- [🌉 Node.js Server] <---🌐---> [💻 Your Browser]
+[🐍 CV Script] ---📢---> [📡 MQTT Broker] <---📢--- [💻 Your Browser (TF.js + MQTT over WebSocket)]
 ```
 
 ## 🗂️ Folder Structure
@@ -98,16 +98,27 @@ npm start
 
 Your server should now be live at `http://localhost:3000`! 🌍
 
+## 🌍 Deploy to Vercel
+
+The production app is 100% static — `vercel.json` simply serves the `public/` folder, no server required.
+
+1. Push this repo to GitHub.
+2. Go to [vercel.com/new](https://vercel.com/new) and import the repository.
+3. Click **Deploy**. No environment variables needed.
+
+Model weights (`.bin` shards) are cached with `immutable` headers, so repeat visits load the model almost instantly. If you ever replace the model, rename the `public/best_web_model/` folder so clients pick up the new weights.
+
 ## 🧩 MQTT Setup
 
-This app is set up to connect to a public MQTT broker out-of-the-box.
+This app is set up to connect to a public MQTT broker out-of-the-box. The browser talks to the broker directly over WebSocket:
 
-*   **Broker:** `mqtt://test.mosquitto.org` (You can change this in `server.js`).
-*   **Publishes to:** `prediction/output` (or whatever you set in `MQTT_TOPIC_PUBLISH`). The web UI sends data to this topic.
+*   **Broker (browser):** `wss://test.mosquitto.org:8081` — change this in `public/scripts/script.js`.
+*   **Publishes to:** `input/gestur` — the `MQTT_TOPIC_PUBLISH` constant in `public/scripts/script.js`.
+*   **Broker (local dev server):** `mqtt://test.mosquitto.org` (you can change this in `server.js`).
 
 ## 🔍 Sample Usage
 
-The server provides a couple of simple API endpoints for the frontend.
+The local dev server provides a couple of simple API endpoints (note: the deployed Vercel app no longer uses these — the browser publishes to MQTT directly).
 
 *   **Get the latest data:**
     ```bash

@@ -1,23 +1,55 @@
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
 
-let model;
-// 👉 1. Ukuran input model diubah sesuai metadata.yaml
+// 👉 MQTT: browser connect langsung ke broker via WebSocket (WSS)
+const MQTT_URL = "wss://test.mosquitto.org:8081";
+const MQTT_TOPIC_PUBLISH = "input/gestur";
+
 const modelInputSize = 640;
 const CONFIDENCE_THRESHOLD = 0.5;
 const IOU_THRESHOLD = 0.4;
 
-// 👉 2. Nama kelas diperbarui sesuai metadata.yaml
+// 👉 Nama kelas & warna sesuai metadata.yaml
 const CLASS_NAMES = ["mask", "no-mask"];
-// 👉 Menambahkan warna untuk setiap kelas
 const CLASS_COLORS = ["lime", "red"];
 
+let model = null;
+let mqttClient = null;
 let isDetecting = false;
 let detectLoopId = null;
 
-let lastApiCallTime = 0;
-const API_CALL_DELAY = 1000;
+// 👉 Throttle pengiriman data ke MQTT
+let lastPublishTime = 0;
+const PUBLISH_DELAY = 2000;
+
+function setupMqtt() {
+  mqttClient = mqtt.connect(MQTT_URL, { reconnectPeriod: 3000 });
+
+  mqttClient.on("connect", () => console.log("Connected to MQTT broker"));
+  mqttClient.on("reconnect", () => console.log("Reconnecting to MQTT broker..."));
+  mqttClient.on("error", (err) => console.error("MQTT error:", err.message));
+}
+
+function publishDetections(results) {
+  if (results.length === 0) return;
+  if (!mqttClient || !mqttClient.connected) {
+    console.warn("MQTT belum terhubung, data tidak dikirim.");
+    return;
+  }
+
+  const payload = results.map((result) => result.label).join(",");
+  mqttClient.publish(MQTT_TOPIC_PUBLISH, payload);
+  console.log("Data terkirim ke MQTT:", payload);
+}
+
+// Fungsi untuk menyesuaikan ukuran canvas dengan video
+function resizeCanvas() {
+  canvas.width = video.clientWidth;
+  canvas.height = video.clientHeight;
+}
 
 // Setup webcam
 async function setupCamera() {
@@ -30,43 +62,29 @@ async function setupCamera() {
   });
   video.srcObject = stream;
   return new Promise((resolve) => {
-    video.onloadedmetadata = () => resolve(video);
+    video.onloadedmetadata = () => {
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+      resolve(video);
+    };
   });
 }
 
-async function sendData(data) {
-  if (data.length === 0) return;
-
-  const payload = data.map((result) => result.label).join(",");
-  console.log("Mengirim data (text):", payload);
-
-  try {
-    const response = await fetch("/prediction", {
-      method: "POST",
-      headers: {
-        "Content-Type": "text/plain",
-      },
-      body: payload,
-    });
-
-    if (!response.ok) {
-      console.error(`Panggilan API gagal dengan status: ${response.status}`);
-    } else {
-      const responseText = await response.text();
-      console.log("Data berhasil dikirim. Respons server:", responseText);
-    }
-  } catch (error) {
-    console.error("Gagal mengirim data deteksi:", error);
-  }
-}
-
 // Load TFJS model
-async function loadModel() {
-  model = await tf.loadGraphModel("model/model.json");
+async function loadModel(onProgress) {
+  model = await tf.loadGraphModel("./best_web_model/model.json", { onProgress });
   console.log("Model loaded successfully.");
 }
 
-// 👉 Modifikasi: Menggambar bounding box dengan warna dan label yang sesuai
+// 👉 Warm-up: kompilasi shader backend sebelum deteksi pertama
+async function warmUpModel() {
+  const dummy = tf.zeros([1, modelInputSize, modelInputSize, 3]);
+  const output = model.execute(dummy);
+  dummy.dispose();
+  output.dispose();
+}
+
+// Menggambar bounding box
 function drawBox([x, y, w, h], score, label, color) {
   const scaleX = canvas.width / modelInputSize;
   const scaleY = canvas.height / modelInputSize;
@@ -76,7 +94,6 @@ function drawBox([x, y, w, h], score, label, color) {
   const boxW = w * scaleX;
   const boxH = h * scaleY;
 
-  // Atur warna dan gaya teks
   ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.strokeRect(x1, y1, boxW, boxH);
@@ -109,7 +126,7 @@ async function applyNMS(boxes, scores) {
   return selected;
 }
 
-// Loop deteksi untuk multi-class
+// Loop deteksi
 async function detectFrame() {
   tf.engine().startScope();
 
@@ -124,13 +141,17 @@ async function detectFrame() {
   const data = prediction.transpose([0, 2, 1]).squeeze();
   const predictionsArray = await data.array();
 
+  input.dispose();
+  prediction.dispose();
+  data.dispose();
+
   const boxList = [];
   const scoreList = [];
   const classList = [];
 
-  for (const prediction of predictionsArray) {
-    const boxCoords = prediction.slice(0, 4);
-    const classScores = prediction.slice(4);
+  for (const p of predictionsArray) {
+    const boxCoords = p.slice(0, 4);
+    const classScores = p.slice(4);
 
     let maxScore = 0;
     let classId = -1;
@@ -158,6 +179,14 @@ async function detectFrame() {
     selected = await applyNMS(boxList, scoreList);
   }
 
+  // 👉 Guard SETELAH semua await: jika stop ditekan saat inference masih
+  // berjalan, bersihkan canvas dan jangan menggambar apa pun
+  if (!isDetecting) {
+    tf.engine().endScope();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   const results = [];
@@ -167,36 +196,34 @@ async function detectFrame() {
     const score = scoreList[index];
     const classId = classList[index];
     const label = CLASS_NAMES[classId];
-    const color = CLASS_COLORS[classId]; // 👉 Ambil warna berdasarkan kelas
-
-    const w = x2 - x1;
-    const h = y2 - y1;
-    const x = x1 + w / 2;
-    const y = y1 + h / 2;
+    const color = CLASS_COLORS[classId];
 
     results.push({ label: label, score: score });
 
-    drawBox([x, y, w, h], score, label, color); // 👉 Kirim warna ke fungsi drawBox
+    const w = x2 - x1;
+    const h = y2 - y1;
+
+    drawBox([x1 + w / 2, y1 + h / 2, w, h], score, label, color);
+  }
+
+  const currentTime = Date.now();
+  if (currentTime - lastPublishTime > PUBLISH_DELAY && results.length > 0) {
+    publishDetections(results);
+    lastPublishTime = currentTime;
   }
 
   tf.engine().endScope();
 
-  const currentTime = Date.now();
-  // 👇 PERBAIKAN DI DUA BARIS INI
-  if (currentTime - lastApiCallTime > API_CALL_DELAY && results.length > 0) {
-    sendData(results);
-    lastApiCallTime = currentTime;
-  }
-
+  // 👉 Hanya jadwalkan frame berikutnya jika masih mendeteksi
   if (isDetecting) {
     detectLoopId = requestAnimationFrame(detectFrame);
   }
 }
 
 // Event listener untuk tombol
-document.getElementById("startBtn").addEventListener("click", () => {
+startBtn.addEventListener("click", () => {
   if (!model) {
-    console.log("Model not loaded yet, please wait.");
+    console.log("Model belum siap, harap tunggu.");
     return;
   }
   if (!isDetecting) {
@@ -205,7 +232,7 @@ document.getElementById("startBtn").addEventListener("click", () => {
   }
 });
 
-document.getElementById("stopBtn").addEventListener("click", () => {
+stopBtn.addEventListener("click", () => {
   isDetecting = false;
   if (detectLoopId) {
     cancelAnimationFrame(detectLoopId);
@@ -216,8 +243,34 @@ document.getElementById("stopBtn").addEventListener("click", () => {
 
 // Inisialisasi
 (async () => {
-  await setupCamera();
-  await loadModel();
-  document.getElementById("startBtn").disabled = false;
-  console.log("Setup complete. Ready to start detection.");
+  startBtn.textContent = "Memuat Model... 0%";
+
+  try {
+    setupMqtt();
+  } catch (err) {
+    console.warn("MQTT gagal diinisialisasi:", err);
+  }
+
+  try {
+    // 👉 Kamera dan model dimuat PARALEL agar loading lebih cepat
+    const cameraReady = setupCamera();
+    const modelReady = (async () => {
+      await tf.ready();
+      await loadModel((fraction) => {
+        startBtn.textContent = `Memuat Model... ${Math.round(fraction * 100)}%`;
+      });
+      startBtn.textContent = "Memanaskan Model...";
+      await warmUpModel();
+    })();
+
+    await Promise.all([cameraReady, modelReady]);
+
+    startBtn.disabled = false;
+    startBtn.textContent = "Mulai Deteksi";
+    console.log("Setup complete. Ready to start detection.");
+  } catch (err) {
+    console.error("Setup gagal:", err);
+    startBtn.textContent = "Gagal Memuat";
+    startBtn.classList.add("bg-red-500");
+  }
 })();
